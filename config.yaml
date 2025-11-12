@@ -1,0 +1,22 @@
+# Default config; you can also change these in the UI (Settings) at runtime.
+target_url: "http://127.0.0.1:8000/"
+css_selector: "div.Json-Text"
+poll_interval_sec: 1
+bind_host: "0.0.0.0"
+bind_port: 5000
+write_latest_to_runtime_file: true
+runtime_file_path: ""
+request_timeout_sec: 5
+
+# Dotted key paths into the JSON
+latitude_key: "location.latitude"
+longitude_key: "location.longitude"
+altitude_key: "location.altitudeMeters"
+gps_time_key: "location.gpsTimeS"
+
+# GPS->UTC
+gps_leap_seconds: 18
+
+# NTP
+ntp_server: "time.nist.gov"
+ntp_refresh_sec: 30
