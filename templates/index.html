@@ -1,0 +1,177 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Live System Location</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <style>
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, sans-serif; margin: 0; background: #0b0f14; color: #e2e8f0; }
+    header { padding: 16px; border-bottom: 1px solid #1f2937; position: sticky; top: 0; background: #0b0f14; z-index: 5; }
+    h1 { font-size: 20px; margin: 0; }
+    .grid { display: grid; grid-template-columns: 2fr 1fr; gap: 16px; padding: 16px; }
+    .card { background: #111827; border: 1px solid #1f2937; border-radius: 14px; padding: 16px; box-shadow: 0 6px 20px rgba(0,0,0,0.25); }
+    #map { height: 50vh; border-radius: 12px; }
+    .kv { display: grid; grid-template-columns: 160px 1fr; gap: 6px; }
+    .muted { color: #9ca3af; }
+    .pill { display: inline-block; padding: 4px 10px; border-radius: 999px; background: #0b3b2e; color: #a7f3d0; font-size: 12px; border: 1px solid #065f46; }
+    .error { background: #3b0b0b; color: #fecaca; border-color: #7f1d1d; }
+    a { color: #93c5fd; }
+    code { background: #0b1220; border: 1px solid #1f2937; padding: 2px 6px; border-radius: 6px; }
+    textarea { width: 100%; min-height: 120px; border-radius: 8px; background:#0b1220; color:#e2e8f0; border:1px solid #1f2937; padding: 8px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+    input[type="text"], input[type="number"] { width: 100%; border-radius: 8px; background:#0b1220; color:#e2e8f0; border:1px solid #1f2937; padding: 8px; }
+    button { padding: 8px 12px; border-radius: 10px; border:1px solid #1f2937; background:#0f172a; color:#e2e8f0; cursor:pointer; }
+    button:hover { filter: brightness(1.1); }
+    @media (max-width: 1200px) { .grid { grid-template-columns: 1fr; } #map { height: 45vh; } }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Live System Location</h1>
+  </header>
+
+  <div class="grid">
+    <div class="card">
+      <div id="map"></div>
+      <div style="height:12px"></div>
+      <h3>Live data</h3>
+      <div class="kv">
+        <div class="muted">Latitude</div><div id="lat">—</div>
+        <div class="muted">Longitude</div><div id="lon">—</div>
+        <div class="muted">Altitude</div><div id="alt">—</div>
+        <div class="muted">Last update</div><div id="ts">—</div>
+        <div class="muted">Status</div><div id="status" class="pill">Waiting for first update...</div>
+      </div>
+      <div style="height:12px"></div>
+      <details>
+        <summary>Raw JSON (latest)</summary>
+        <textarea id="raw" readonly></textarea>
+      </details>
+    </div>
+
+    <div class="card">
+      <h3>Time alignment</h3>
+      <div class="kv">
+        <div class="muted">PC UTC</div><div id="pc">—</div>
+        <div class="muted">GPS UTC</div><div id="gps">—</div>
+        <div class="muted">NIST NTP</div><div id="ntp">—</div>
+        <div class="muted">Δ PC − GPS</div><div id="d_pc_gps">—</div>
+        <div class="muted">Δ NTP − PC</div><div id="d_ntp_pc">—</div>
+        <div class="muted">Δ NTP − GPS</div><div id="d_ntp_gps">—</div>
+      </div>
+
+      <div style="height:16px"></div>
+      <h3>Settings</h3>
+      <div class="kv">
+        <div class="muted">Source URL</div><div><input id="cfg_url" type="text" /></div>
+        <div class="muted">CSS selector</div><div><input id="cfg_sel" type="text" /></div>
+        <div class="muted">Latitude key</div><div><input id="cfg_lat" type="text" /></div>
+        <div class="muted">Longitude key</div><div><input id="cfg_lon" type="text" /></div>
+        <div class="muted">Altitude key</div><div><input id="cfg_alt" type="text" /></div>
+        <div class="muted">GPS time key</div><div><input id="cfg_gps" type="text" /></div>
+        <div class="muted">GPS leap seconds</div><div><input id="cfg_leap" type="number" min="0" /></div>
+        <div class="muted">NTP server</div><div><input id="cfg_ntp" type="text" /></div>
+      </div>
+      <div style="height:8px"></div>
+      <button id="save">Save settings</button>
+      <span class="muted">Changes apply immediately and persist to config.yaml.</span>
+
+      <div style="height:16px"></div>
+      <div class="kv">
+        <div class="muted">Runtime file</div><div><code id="rtfile">/run/user/$UID/current_location.json</code></div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    let map = L.map('map').setView([0,0], 2);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 19,
+      attribution: '&copy; OpenStreetMap contributors'
+    }).addTo(map);
+    let marker = L.marker([0,0]).addTo(map);
+
+    function fmtMs(v) { return (v === null || v === undefined) ? "—" : (v + " ms"); }
+
+    async function loadConfig() {
+      const r = await fetch('/api/config');
+      const c = await r.json();
+      document.getElementById('cfg_url').value = c.target_url || "";
+      document.getElementById('cfg_sel').value = c.css_selector || "";
+      document.getElementById('cfg_lat').value = c.latitude_key || "";
+      document.getElementById('cfg_lon').value = c.longitude_key || "";
+      document.getElementById('cfg_alt').value = c.altitude_key || "";
+      document.getElementById('cfg_gps').value = c.gps_time_key || "";
+      document.getElementById('cfg_leap').value = c.gps_leap_seconds || 18;
+      document.getElementById('cfg_ntp').value = c.ntp_server || "time.nist.gov";
+      document.getElementById('rtfile').textContent = c.runtime_file_path || "/run/user/$UID/current_location.json";
+    }
+
+    async function refreshState() {
+      const r = await fetch('/api/state');
+      const s = await r.json();
+      if (s.latitude !== null && s.longitude !== null) {
+        document.getElementById('lat').textContent = s.latitude.toFixed(6);
+        document.getElementById('lon').textContent = s.longitude.toFixed(6);
+        document.getElementById('alt').textContent = (s.altitude != null) ? s.altitude.toFixed(2) : '—';
+        document.getElementById('ts').textContent = s.last_update_iso || '—';
+        marker.setLatLng([s.latitude, s.longitude]);
+        map.setView([s.latitude, s.longitude], Math.max(map.getZoom(), 15));
+      }
+      document.getElementById('status').textContent = s.note || '—';
+      document.getElementById('raw').value = s.last_raw ? JSON.stringify(s.last_raw, null, 2) : '';
+
+      document.getElementById('pc').textContent = s.pc_time_iso || '—';
+      document.getElementById('gps').textContent = s.gps_time_iso || '—';
+      document.getElementById('ntp').textContent = s.ntp_time_iso || '—';
+      document.getElementById('d_pc_gps').textContent = fmtMs(s.delta_pc_vs_gps_ms);
+      document.getElementById('d_ntp_pc').textContent = fmtMs(s.delta_ntp_vs_pc_ms);
+      document.getElementById('d_ntp_gps').textContent = fmtMs(s.delta_ntp_vs_gps_ms);
+    }
+
+    document.getElementById('save').addEventListener('click', async () => {
+      const body = {
+        target_url: document.getElementById('cfg_url').value,
+        css_selector: document.getElementById('cfg_sel').value,
+        latitude_key: document.getElementById('cfg_lat').value,
+        longitude_key: document.getElementById('cfg_lon').value,
+        altitude_key: document.getElementById('cfg_alt').value,
+        gps_time_key: document.getElementById('cfg_gps').value,
+        gps_leap_seconds: parseInt(document.getElementById('cfg_leap').value || '18', 10),
+      };
+      const ntpSrv = document.getElementById('cfg_ntp').value;
+      if (ntpSrv) body.ntp_server = ntpSrv;
+      const r = await fetch('/api/config', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
+      const resp = await r.json();
+      if (resp.ok) {
+        document.getElementById('status').textContent = 'Settings saved. Polling new source…';
+      } else {
+        document.getElementById('status').textContent = 'Failed to save settings: ' + (resp.error || '');
+      }
+    });
+
+    // Live location via SSE
+    const evt = new EventSource('/stream');
+    evt.addEventListener('update', (e) => {
+      try {
+        const payload = JSON.parse(e.data);
+        const [lat, lon, alt] = payload.data;
+        marker.setLatLng([lat, lon]);
+        map.setView([lat, lon], Math.max(map.getZoom(), 15));
+        document.getElementById('lat').textContent = (+lat).toFixed(6);
+        document.getElementById('lon').textContent = (+lon).toFixed(6);
+        document.getElementById('alt').textContent = (alt != null) ? (+alt).toFixed(2) : '—';
+        document.getElementById('ts').textContent = payload.time || new Date().toISOString();
+        document.getElementById('status').textContent = 'Location updated.';
+      } catch (err) {
+        document.getElementById('status').textContent = 'Stream parse error';
+      }
+    });
+
+    loadConfig();
+    refreshState();
+    setInterval(refreshState, 3000);
+  </script>
+</body>
+</html>
