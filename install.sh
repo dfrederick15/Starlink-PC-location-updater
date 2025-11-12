@@ -11,9 +11,9 @@ usage() {
 Usage: ./install.sh [options]
 
 Options:
-  --url URL                Target webpage URL (default: from config.yaml)
-  --selector CSS           CSS selector for JSON (default: from config.yaml)
-  --lat-key KEY            Dotted key for latitude (default: from config.yaml)
+  --url URL                Target webpage URL
+  --selector CSS           CSS selector for JSON
+  --lat-key KEY            Dotted key for latitude
   --lon-key KEY            Dotted key for longitude
   --alt-key KEY            Dotted key for altitude
   --gps-key KEY            Dotted key for gpsTimeS
@@ -21,9 +21,6 @@ Options:
   --service                Install as a systemd user service
   --start                  Start service immediately
   -h, --help               Show this help
-
-Examples:
-  ./install.sh --url http://192.168.1.1/status --service --start
 EOF
 }
 
@@ -63,6 +60,7 @@ venv_setup() {
 
 apply_config() {
   echo "[*] Updating config.yaml…"
+  # Use python + PyYAML for safe edits
   source "${VENV_DIR}/bin/activate"
   python - <<PY
 import yaml
@@ -105,7 +103,6 @@ EOF
 }
 
 main() {
-  echo "[*] Installing Location Watcher to ${APP_DIR}"
   apt_install
   venv_setup
   apply_config
@@ -116,8 +113,7 @@ main() {
     echo "Run manually with:"
     echo "  source \"${VENV_DIR}/bin/activate\""
     echo "  python3 app.py"
-    echo "Then open http://localhost:5000"
+    echo "Then open: http://localhost:5000"
   fi
 }
-
 main "$@"
