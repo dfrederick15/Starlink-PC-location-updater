@@ -151,7 +151,6 @@
       }
     });
 
-    // Live location via SSE
     const evt = new EventSource('/stream');
     evt.addEventListener('update', (e) => {
       try {
